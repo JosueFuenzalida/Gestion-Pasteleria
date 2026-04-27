@@ -2,7 +2,7 @@
   "relation": ["delegate_permission/common.handle_all_urls"],
   "target": {
     "namespace": "android_app",
-    "package_name": "io.github.josuefuenzalida.twa", 
-    "sha256_cert_fingerprints": ["C9:0E:5C:67:31:6A:93:6B:6C:D5:46:EB:EA:50:5B:86:40:F1:BF:88:B6:CA:B3:0A:90:17:DD:27:E5:DD:04:6C"]
+    "package_name": "io.github.josuefuenzalida.gestionpasteleria", 
+    "sha256_cert_fingerprints": ["46:94:DC:F4:8E:F3:36:43:3E:B0:46:DA:AF:8C:68:14:B7:F6:19:E9:05:9B:A1:C5:C6:3F:87:4C:F3:7F:E0:9A"]
   }
 }]

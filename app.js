@@ -29,15 +29,15 @@ function emptyDB() {
     pedidos: [],
     clientes: [],
     materiales_maestro: ["Harina", "Azucar", "Mantequilla", "Huevos", "Crema"],
+    categorias: ["DULCE", "SALADO", "COCTELERIA / OTROS"],
     config: {
-      github_repo: "",
-      github_token: "",
       theme: "azul",
       primary_color: "#e58ba6",
-      backup_path: "",
       sync_state: "idle",
       business_name: "Pasteleria Fulano",
-      business_logo: ""
+      business_logo: "",
+      business_banner: "",
+      font_scale: 1
     }
   };
 }
@@ -56,6 +56,7 @@ function loadDB() {
     return {
       ...emptyDB(),
       ...parsed,
+      categorias: parsed.categorias || emptyDB().categorias,
       config: { ...emptyDB().config, ...(parsed.config || {}) }
     };
   } catch {
@@ -107,7 +108,6 @@ function initUI() {
     setView("ajustes");
     closeTopMenu();
   });
-  $("#menu-sync").addEventListener("click", () => { forzarSync(); closeTopMenu(); });
   $("#menu-export").addEventListener("click", () => { exportarJSON(); closeTopMenu(); });
   $("#menu-import").addEventListener("click", () => { $("#import-file").click(); closeTopMenu(); });
 
@@ -138,13 +138,24 @@ function initUI() {
   $("#copiar-whatsapp").addEventListener("click", copiarWhatsApp);
   $("#buscar-cliente").addEventListener("input", renderClientes);
 
-  $("#forzar-sync").addEventListener("click", forzarSync);
+  $("#forzar-sync") && $("#forzar-sync").addEventListener && null; // removed
   $("#cfg-theme").addEventListener("change", saveConfigFromUI);
-  $("#cfg-repo").addEventListener("input", saveConfigFromUI);
-  $("#cfg-token").addEventListener("input", saveConfigFromUI);
-  $("#cfg-backup-path").addEventListener("input", saveConfigFromUI);
   $("#cfg-biz-name").addEventListener("input", saveConfigFromUI);
   $("#cfg-logo-file").addEventListener("change", handleBizLogo);
+  $("#cfg-banner-file").addEventListener("change", handleBizBanner);
+  $("#cfg-banner-clear").addEventListener("click", () => {
+    db.config.business_banner = "";
+    saveDB();
+    renderTopbar();
+  });
+  $("#cfg-font-scale").addEventListener("input", () => {
+    const v = parseFloat($("#cfg-font-scale").value);
+    db.config.font_scale = v;
+    saveDB();
+    applyFontScale(v);
+    $("#font-scale-display").textContent = Math.round(v * 100) + "%";
+  });
+  $("#agregar-categoria").addEventListener("click", agregarCategoria);
   $("#export-json").addEventListener("click", exportarJSON);
   $("#import-json").addEventListener("click", () => $("#import-file").click());
   $("#import-file").addEventListener("change", importarJSON);
@@ -176,6 +187,7 @@ function initCollapsibleCards() {
 
 function renderAll() {
   applyTheme();
+  applyFontScale(db.config.font_scale || 1);
   renderTopbar();
   renderAgenda();
   renderProductoAccordion();
@@ -270,6 +282,13 @@ function renderTopbar() {
     fallback.classList.remove("hidden");
     fallback.textContent = initials(db.config.business_name || "Pasteleria Fulano");
   }
+  const banner = $("#topbar-banner");
+  if (db.config.business_banner) {
+    banner.src = db.config.business_banner;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
 }
 
 function renderAgenda() {
@@ -327,21 +346,34 @@ function selectCliente(id) {
 
 function renderProductoAccordion() {
   const container = $("#producto-accordion");
-  const categories = ["DULCE", "SALADO", "COCTELERIA / OTROS"];
+  const categories = db.categorias || ["DULCE", "SALADO", "COCTELERIA / OTROS"];
+
+  // Preserve which accordions are currently open
+  const openStates = {};
+  container.querySelectorAll(".accordion").forEach(ac => {
+    const head = ac.querySelector(".accordion-head");
+    if (head) openStates[head.dataset.cat] = ac.classList.contains("open");
+  });
+
   container.innerHTML = categories.map((cat, idx) => {
+    const isOpen = cat in openStates ? openStates[cat] : idx === 0;
     const products = db.productos.filter(p => p.cat === cat);
-    return `<div class="accordion ${idx === 0 ? "open" : ""}">
-      <button class="accordion-head">${idx === 0 ? "▼" : "▶"} ${cat}</button>
+    return `<div class="accordion ${isOpen ? "open" : ""}">
+      <button class="accordion-head" data-cat="${escAttr(cat)}">${isOpen ? "▼" : "▶"} ${esc(cat)}</button>
       <div class="accordion-body">
         ${products.length ? products.map(renderProductRow).join("") : `<div class="card">Sin productos</div>`}
       </div>
     </div>`;
   }).join("");
-  $$(".accordion-head").forEach(h => h.addEventListener("click", () => {
-    const ac = h.parentElement;
-    ac.classList.toggle("open");
-    h.textContent = `${ac.classList.contains("open") ? "▼" : "▶"} ` + h.textContent.slice(2);
-  }));
+
+  container.querySelectorAll(".accordion-head").forEach(h => {
+    h.addEventListener("click", () => {
+      const ac = h.parentElement;
+      const opening = !ac.classList.contains("open");
+      ac.classList.toggle("open", opening);
+      h.textContent = `${opening ? "▼" : "▶"} ${h.dataset.cat}`;
+    });
+  });
 }
 
 function renderProductRow(p) {
@@ -471,6 +503,13 @@ function openProductoModal(editId = null) {
   state.recipeDraft = [];
   state.photoDraft = "";
 
+  // Populate category select dynamically
+  const catSelect = wrap.querySelector("#prod-cat");
+  if (catSelect) {
+    catSelect.innerHTML = (db.categorias || ["DULCE", "SALADO", "COCTELERIA / OTROS"])
+      .map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("");
+  }
+
   openModal({
     title: editId ? "Editar producto" : "Nuevo producto",
     bodyNode: wrap,
@@ -549,12 +588,12 @@ function renderRecipeDraft() {
   table.innerHTML = state.recipeDraft.map((r, i) => `
     <div class="material-row">
       <div>${esc(r.material)}</div>
-      <input type="number" min="0" step="any" value="${r.cantidad}" onchange="updReceta(${i},'cantidad',this.value)">
+      <input type="number" min="0" step="any" value="${r.cantidad}" enterkeyhint="next" onchange="updReceta(${i},'cantidad',this.value)">
       <select onchange="updReceta(${i},'unidad',this.value)">
         ${UNIDADES.map(u => `<option ${u === r.unidad ? "selected" : ""}>${u}</option>`).join("")}
       </select>
-      <input type="number" min="0" step="1" value="${r.costo_unit || 0}" onchange="updReceta(${i},'costo_unit',this.value)">
-      <button class="btn" onclick="delReceta(${i})">X</button>
+      <input type="number" min="0" step="1" value="${r.costo_unit || 0}" enterkeyhint="done" onchange="updReceta(${i},'costo_unit',this.value)">
+      <button class="btn" onclick="delReceta(${i})">✕</button>
     </div>
   `).join("");
   const total = state.recipeDraft.reduce((acc, r) => acc + (Number(r.cantidad || 0) * Number(r.costo_unit || 0)), 0);
@@ -776,18 +815,48 @@ function copiarWhatsApp() {
 }
 
 function renderAjustes() {
-  $("#cfg-repo").value = db.config.github_repo || "";
-  $("#cfg-token").value = db.config.github_token || "";
   $("#cfg-theme").value = db.config.theme === "verde" ? "verde" : "azul";
-  $("#cfg-backup-path").value = db.config.backup_path || "";
   $("#cfg-biz-name").value = db.config.business_name || "Pasteleria Fulano";
+  const scale = db.config.font_scale || 1;
+  $("#cfg-font-scale").value = scale;
+  $("#font-scale-display").textContent = Math.round(scale * 100) + "%";
+  renderCategorias();
+}
+
+function renderCategorias() {
+  const lista = $("#categorias-lista");
+  if (!lista) return;
+  const cats = db.categorias || [];
+  lista.innerHTML = cats.map((cat, i) => `
+    <div class="row">
+      <span style="flex:1;font-size:18px">${esc(cat)}</span>
+      ${cats.length > 1 ? `<button class="mini-btn" onclick="eliminarCategoria(${i})">✕</button>` : ""}
+    </div>
+  `).join("");
+}
+
+function agregarCategoria() {
+  const inp = $("#nueva-categoria-input");
+  const val = inp.value.trim().toUpperCase();
+  if (!val) return;
+  if (db.categorias.includes(val)) return openMessage("Categoría", "Ya existe esa categoría.");
+  db.categorias.push(val);
+  saveDB();
+  inp.value = "";
+  renderCategorias();
+}
+
+function eliminarCategoria(i) {
+  const cat = db.categorias[i];
+  const enUso = db.productos.some(p => p.cat === cat);
+  if (enUso) return openMessage("Categoría en uso", `"${cat}" tiene productos asignados. Cambia o elimina esos productos primero.`);
+  db.categorias.splice(i, 1);
+  saveDB();
+  renderCategorias();
 }
 
 function saveConfigFromUI() {
-  db.config.github_repo = $("#cfg-repo").value.trim();
-  db.config.github_token = $("#cfg-token").value.trim();
   db.config.theme = $("#cfg-theme").value === "verde" ? "verde" : "azul";
-  db.config.backup_path = $("#cfg-backup-path").value.trim();
   db.config.business_name = $("#cfg-biz-name").value.trim() || "Pasteleria Fulano";
   saveDB();
   renderTopbar();
@@ -802,15 +871,29 @@ async function handleBizLogo(e) {
   renderTopbar();
 }
 
+async function handleBizBanner(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  db.config.business_banner = await compressToBase64(file, 880);
+  saveDB();
+  renderTopbar();
+}
+
+function applyFontScale(scale) {
+  document.documentElement.style.setProperty("--font-scale", scale || 1);
+}
+
 function applyTheme() {
   const t = db.config.theme === "verde" ? "verde" : "azul";
   const root = document.documentElement;
   const customPrimary = db.config.primary_color || "#e58ba6";
   let palette;
   if (t === "azul") {
-    palette = { bg: "#f4faff", surface: "#ecf7ff", surfaceSoft: "#bfe6ff", surfaceDeep: "#9fd5ef", line: "#14222d", text: "#0b161f", textSoft: "#172733", textMuted: "#324b5f", primary: customPrimary };
-  } else if (t === "verde") {
-    palette = { bg: "#f7fff5", surface: "#f0ffe9", surfaceSoft: "#d0f0c7", surfaceDeep: "#b7e3ab", line: "#1a2b1a", text: "#0d170d", textSoft: "#1d2f1d", textMuted: "#3e5a3f", primary: customPrimary };
+    palette = { bg: "#f4faff", surface: "#ecf7ff", surfaceSoft: "#bfe6ff", surfaceDeep: "#9fd5ef", line: "#14222d", text: "#0b161f", textSoft: "#172733", textMuted: "#324b5f", primary: customPrimary,
+      card1:"#ecf7ff", card2:"#fef0f5", card3:"#f4f0ff", card4:"#f0fff8", card5:"#fffbe6", card6:"#f0f8ff" };
+  } else {
+    palette = { bg: "#f7fff5", surface: "#f0ffe9", surfaceSoft: "#d0f0c7", surfaceDeep: "#b7e3ab", line: "#1a2b1a", text: "#0d170d", textSoft: "#1d2f1d", textMuted: "#3e5a3f", primary: customPrimary,
+      card1:"#f0ffe9", card2:"#fef9e7", card3:"#f0f8ff", card4:"#fdf0f5", card5:"#f5f0ff", card6:"#f0fff4" };
   }
   root.style.setProperty("--bg", palette.bg);
   root.style.setProperty("--surface", palette.surface);
@@ -822,6 +905,12 @@ function applyTheme() {
   root.style.setProperty("--text-muted", palette.textMuted);
   root.style.setProperty("--primary", palette.primary);
   root.style.setProperty("--primary-soft", hexToAlpha(palette.primary, 0.2));
+  root.style.setProperty("--card-1", palette.card1);
+  root.style.setProperty("--card-2", palette.card2);
+  root.style.setProperty("--card-3", palette.card3);
+  root.style.setProperty("--card-4", palette.card4);
+  root.style.setProperty("--card-5", palette.card5);
+  root.style.setProperty("--card-6", palette.card6);
   updateThemeColorMeta(palette.bg);
 }
 

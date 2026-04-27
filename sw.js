@@ -1,16 +1,16 @@
 const CACHE_NAME = "pasteleria-v7";
-const OFFLINE_ASSETS = [
-  "./",
-  "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./manifest.json",
-  "./icon.svg"
+const ASSETS = [
+  "./Gestion-Pasteleria/",
+  "./Gestion-Pasteleria/index.html",
+  "./Gestion-Pasteleria/styles.css",
+  "./Gestion-Pasteleria/app.js",
+  "./Gestion-Pasteleria/manifest.json",
+  "./Gestion-Pasteleria/icon.svg"
 ];
 
 self.addEventListener("install", event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(OFFLINE_ASSETS))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
@@ -34,7 +34,7 @@ self.addEventListener("fetch", event => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
         return res;
-      }).catch(() => caches.match("./index.html"));
+      }).catch(() => caches.match('/Gestion-Pasteleria/'));
     })
   );
 });

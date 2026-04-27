@@ -1,0 +1,21 @@
+{
+  "name": "Gestion Pasteleria",
+  "short_name": "Pasteleria",
+  "description": "Gestion de pedidos, catalogo y clientes para pasteleria.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "categories": ["business", "productivity", "food"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -11,7 +11,11 @@ const UNIDADES = ["un", "kg", "gr", "lt", "ml"];
 
 const state = {
   view: "agenda",
+  agendaView: "calendario",   // "calendario" | "lista"
   agendaFilter: "hoy",
+  calYear: new Date().getFullYear(),
+  calMonth: new Date().getMonth(),
+  calSelectedDate: new Date().toISOString().slice(0, 10),
   selectedClientId: null,
   cart: {},
   recipeDraft: [],
@@ -29,7 +33,7 @@ function emptyDB() {
     pedidos: [],
     clientes: [],
     materiales_maestro: ["Harina", "Azucar", "Mantequilla", "Huevos", "Crema"],
-    categorias: ["DULCE", "SALADO", "COCTELERIA / OTROS"],
+    categorias: ["Dulce", "Salado", "Coctelería / Otros"],
     config: {
       theme: "azul",
       primary_color: "#e58ba6",
@@ -70,10 +74,11 @@ function saveDB() {
 
 function seedIfNeeded() {
   if (db.productos.length === 0) {
+    const cat = (db.categorias && db.categorias[0]) || "Dulce";
     db.productos.push({
       id: uid(),
       nombre: "Torta Tres Leches",
-      cat: "DULCE",
+      cat: cat,
       precio: 18000,
       unidad_venta: "un",
       foto_b64: "",
@@ -104,27 +109,45 @@ function initUI() {
     closeModal();
   });
 
-  $("#menu-open-ajustes").addEventListener("click", () => {
-    setView("ajustes");
-    closeTopMenu();
-  });
+  $("#menu-open-ajustes").addEventListener("click", () => { setView("ajustes"); closeTopMenu(); });
   $("#menu-export").addEventListener("click", () => { exportarJSON(); closeTopMenu(); });
   $("#menu-import").addEventListener("click", () => { $("#import-file").click(); closeTopMenu(); });
 
   $$(".bottom-item").forEach(btn => btn.addEventListener("click", () => setView(btn.dataset.view)));
   $("#view-fab").addEventListener("click", onFabClick);
 
-  $$(".chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      state.agendaFilter = chip.dataset.filter;
-      $$(".chip").forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      $("#agenda-range").classList.toggle("hidden", state.agendaFilter !== "rango");
+  // Agenda: toggle vista calendario / lista
+  document.querySelectorAll("[data-agview]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.agendaView = btn.dataset.agview;
+      document.querySelectorAll("[data-agview]").forEach(b => b.classList.toggle("active", b.dataset.agview === state.agendaView));
+      $("#agenda-cal-wrap").classList.toggle("hidden", state.agendaView !== "calendario");
+      $("#agenda-list-wrap").classList.toggle("hidden", state.agendaView !== "lista");
       renderAgenda();
     });
   });
-  $("#agenda-from").addEventListener("change", renderAgenda);
-  $("#agenda-to").addEventListener("change", renderAgenda);
+
+  // Lista: filtros
+  document.querySelectorAll("#agenda-list-wrap .chip[data-filter]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      state.agendaFilter = chip.dataset.filter;
+      document.querySelectorAll("#agenda-list-wrap .chip[data-filter]").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      renderAgenda();
+    });
+  });
+
+  // Calendario: prev/next mes
+  $("#cal-prev").addEventListener("click", () => {
+    state.calMonth--;
+    if (state.calMonth < 0) { state.calMonth = 11; state.calYear--; }
+    renderCalendario();
+  });
+  $("#cal-next").addEventListener("click", () => {
+    state.calMonth++;
+    if (state.calMonth > 11) { state.calMonth = 0; state.calYear++; }
+    renderCalendario();
+  });
 
   $("#pedido-cliente").addEventListener("input", renderClienteSuggestions);
   $("#capturar-gps").addEventListener("click", capturarGPS);
@@ -138,16 +161,11 @@ function initUI() {
   $("#copiar-whatsapp").addEventListener("click", copiarWhatsApp);
   $("#buscar-cliente").addEventListener("input", renderClientes);
 
-  $("#forzar-sync") && $("#forzar-sync").addEventListener && null; // removed
   $("#cfg-theme").addEventListener("change", saveConfigFromUI);
   $("#cfg-biz-name").addEventListener("input", saveConfigFromUI);
   $("#cfg-logo-file").addEventListener("change", handleBizLogo);
   $("#cfg-banner-file").addEventListener("change", handleBizBanner);
-  $("#cfg-banner-clear").addEventListener("click", () => {
-    db.config.business_banner = "";
-    saveDB();
-    renderTopbar();
-  });
+  $("#cfg-banner-clear").addEventListener("click", () => { db.config.business_banner = ""; saveDB(); renderTopbar(); });
   $("#cfg-font-scale").addEventListener("input", () => {
     const v = parseFloat($("#cfg-font-scale").value);
     db.config.font_scale = v;
@@ -283,46 +301,153 @@ function renderTopbar() {
     fallback.textContent = initials(db.config.business_name || "Pasteleria Fulano");
   }
   const banner = $("#topbar-banner");
-  if (db.config.business_banner) {
-    banner.src = db.config.business_banner;
-    banner.classList.remove("hidden");
-  } else {
-    banner.classList.add("hidden");
+  if (banner) {
+    if (db.config.business_banner) {
+      banner.src = db.config.business_banner;
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
   }
 }
 
 function renderAgenda() {
+  if (state.agendaView === "calendario") {
+    renderCalendario();
+  } else {
+    renderListaAgenda();
+  }
+}
+
+function renderCalendario() {
+  const year = state.calYear;
+  const month = state.calMonth;
+  const today = todayISO();
+  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const DIAS = ["Lu","Ma","Mi","Ju","Vi","Sá","Do"];
+
+  // Días con pedidos este mes
+  const pedidosPorDia = {};
+  db.pedidos.forEach(p => {
+    if (p.fecha && p.fecha.startsWith(`${year}-${String(month+1).padStart(2,"0")}`)) {
+      pedidosPorDia[p.fecha] = (pedidosPorDia[p.fecha] || 0) + 1;
+    }
+  });
+
+  const firstDay = new Date(year, month, 1).getDay(); // 0=dom
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrev = new Date(year, month, 0).getDate();
+  // Adjust: week starts Monday (0=Mon..6=Sun)
+  const startOffset = (firstDay + 6) % 7;
+
+  $("#cal-month-label").textContent = `${MESES[month]} ${year}`;
+
+  let cells = DIAS.map(d => `<div class="cal-dow">${d}</div>`).join("");
+
+  // Días del mes anterior (relleno)
+  for (let i = startOffset - 1; i >= 0; i--) {
+    cells += `<div class="cal-day other-month">${daysInPrev - i}</div>`;
+  }
+
+  // Días del mes actual
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    const isToday = iso === today;
+    const isSelected = iso === state.calSelectedDate;
+    const hasPedidos = pedidosPorDia[iso] > 0;
+    let cls = "cal-day";
+    if (isSelected) cls += " selected";
+    else if (isToday) cls += " today";
+    if (hasPedidos) cls += " has-pedidos";
+    cells += `<div class="${cls}" onclick="selectCalDay('${iso}')">${d}</div>`;
+  }
+
+  // Relleno final
+  const totalCells = startOffset + daysInMonth;
+  const remainder = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 1; i <= remainder; i++) {
+    cells += `<div class="cal-day other-month">${i}</div>`;
+  }
+
+  $("#cal-grid").innerHTML = cells;
+  renderCalDayDetail(state.calSelectedDate);
+}
+
+function selectCalDay(iso) {
+  state.calSelectedDate = iso;
+  // Re-render just the grid to update selection highlight
+  renderCalendario();
+}
+
+function renderCalDayDetail(iso) {
+  const detail = $("#cal-day-detail");
+  if (!detail) return;
+  const pedidos = db.pedidos.filter(p => p.fecha === iso);
+  const [y, m, d] = iso.split("-");
+  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  detail.innerHTML = `<div class="cal-day-header">${parseInt(d)} de ${MESES[parseInt(m)-1]}</div>`;
+  if (!pedidos.length) {
+    detail.innerHTML += `<div class="agenda-card">Sin pedidos este día.</div>`;
+    return;
+  }
+  detail.innerHTML += pedidos.map(p => renderPedidoCard(p)).join("");
+}
+
+function renderListaAgenda() {
   const list = $("#agenda-list");
-  const filtered = db.pedidos.filter(p => filterPedidoByDate(p.fecha));
+  const today = todayISO();
+  let filtered;
+  if (state.agendaFilter === "hoy") {
+    filtered = db.pedidos.filter(p => p.fecha === today);
+  } else if (state.agendaFilter === "manana") {
+    filtered = db.pedidos.filter(p => p.fecha === addDaysISO(today, 1));
+  } else if (state.agendaFilter === "semana") {
+    const fin = addDaysISO(today, 6);
+    filtered = db.pedidos.filter(p => p.fecha >= today && p.fecha <= fin);
+  } else {
+    filtered = [...db.pedidos].sort((a,b) => a.fecha.localeCompare(b.fecha));
+  }
+
   if (!filtered.length) {
     list.innerHTML = `<div class="card">Sin pedidos en este filtro.</div>`;
     return;
   }
-  list.innerHTML = filtered.map(p => {
-    const c = findCliente(p.id_cliente);
-    const items = p.items.map(i => `${i.nombre} x${i.cantidad}`).join(", ");
-    const cls = p.estado === "entregado" ? "agenda-card delivered" : "agenda-card";
-    return `<div class="${cls}">
-      <div><strong>${esc(c ? c.nombre : "Cliente sin nombre")}</strong> · ${esc(p.fecha)} ${esc(p.hora || "")}</div>
-      <div>${esc(items)}</div>
-      <div>${esc(p.despacho || "")}</div>
-      <div class="mini-actions">
-        <button class="mini-btn" onclick="abrirMapa('${p.lat}','${p.lon}')">Ver Mapa</button>
-        <button class="mini-btn" onclick="marcarEntregado('${p.id}')">Marcar Entregado</button>
-        <button class="mini-btn" onclick="llamarCliente('${c ? c.fono : ""}')">Llamar Cliente</button>
-      </div>
-    </div>`;
+
+  // Agrupar por fecha
+  const grupos = {};
+  filtered.forEach(p => { (grupos[p.fecha] = grupos[p.fecha] || []).push(p); });
+  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+  list.innerHTML = Object.keys(grupos).sort().map(fecha => {
+    const [y, m, d] = fecha.split("-");
+    const label = `${parseInt(d)} de ${MESES[parseInt(m)-1]} ${y}`;
+    const cards = grupos[fecha].map(p => renderPedidoCard(p)).join("");
+    return `<div class="cal-day-header">${label}</div>${cards}`;
   }).join("");
+}
+
+function renderPedidoCard(p) {
+  const c = findCliente(p.id_cliente);
+  const items = p.items.map(i => `${i.nombre} x${i.cantidad}`).join(", ");
+  const cls = p.estado === "entregado" ? "agenda-card delivered" : "agenda-card";
+  return `<div class="${cls}">
+    <div><strong>${esc(c ? c.nombre : "Cliente sin nombre")}</strong> · ${esc(p.hora || "")}</div>
+    <div>${esc(items)}</div>
+    <div>${esc(p.despacho || "")}</div>
+    <div class="mini-actions">
+      <button class="mini-btn" onclick="abrirMapa('${p.lat}','${p.lon}')">Ver Mapa</button>
+      <button class="mini-btn" onclick="marcarEntregado('${p.id}')">✓ Entregado</button>
+      <button class="mini-btn" onclick="llamarCliente('${c ? c.fono : ""}')">Llamar</button>
+    </div>
+  </div>`;
 }
 
 function filterPedidoByDate(fecha) {
   const today = todayISO();
   if (state.agendaFilter === "hoy") return fecha === today;
   if (state.agendaFilter === "manana") return fecha === addDaysISO(today, 1);
-  const from = $("#agenda-from").value;
-  const to = $("#agenda-to").value;
-  if (!from || !to) return true;
-  return fecha >= from && fecha <= to;
+  if (state.agendaFilter === "semana") return fecha >= today && fecha <= addDaysISO(today, 6);
+  return true;
 }
 
 function renderClienteSuggestions() {
@@ -346,15 +471,12 @@ function selectCliente(id) {
 
 function renderProductoAccordion() {
   const container = $("#producto-accordion");
-  const categories = db.categorias || ["DULCE", "SALADO", "COCTELERIA / OTROS"];
-
-  // Preserve which accordions are currently open
+  const categories = db.categorias || ["Dulce", "Salado", "Coctelería / Otros"];
   const openStates = {};
   container.querySelectorAll(".accordion").forEach(ac => {
     const head = ac.querySelector(".accordion-head");
     if (head) openStates[head.dataset.cat] = ac.classList.contains("open");
   });
-
   container.innerHTML = categories.map((cat, idx) => {
     const isOpen = cat in openStates ? openStates[cat] : idx === 0;
     const products = db.productos.filter(p => p.cat === cat);
@@ -365,7 +487,6 @@ function renderProductoAccordion() {
       </div>
     </div>`;
   }).join("");
-
   container.querySelectorAll(".accordion-head").forEach(h => {
     h.addEventListener("click", () => {
       const ac = h.parentElement;
@@ -503,13 +624,6 @@ function openProductoModal(editId = null) {
   state.recipeDraft = [];
   state.photoDraft = "";
 
-  // Populate category select dynamically
-  const catSelect = wrap.querySelector("#prod-cat");
-  if (catSelect) {
-    catSelect.innerHTML = (db.categorias || ["DULCE", "SALADO", "COCTELERIA / OTROS"])
-      .map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("");
-  }
-
   openModal({
     title: editId ? "Editar producto" : "Nuevo producto",
     bodyNode: wrap,
@@ -588,12 +702,12 @@ function renderRecipeDraft() {
   table.innerHTML = state.recipeDraft.map((r, i) => `
     <div class="material-row">
       <div>${esc(r.material)}</div>
-      <input type="number" min="0" step="any" value="${r.cantidad}" enterkeyhint="next" onchange="updReceta(${i},'cantidad',this.value)">
+      <input type="number" min="0" step="any" value="${r.cantidad}" onchange="updReceta(${i},'cantidad',this.value)">
       <select onchange="updReceta(${i},'unidad',this.value)">
         ${UNIDADES.map(u => `<option ${u === r.unidad ? "selected" : ""}>${u}</option>`).join("")}
       </select>
-      <input type="number" min="0" step="1" value="${r.costo_unit || 0}" enterkeyhint="done" onchange="updReceta(${i},'costo_unit',this.value)">
-      <button class="btn" onclick="delReceta(${i})">✕</button>
+      <input type="number" min="0" step="1" value="${r.costo_unit || 0}" onchange="updReceta(${i},'costo_unit',this.value)">
+      <button class="btn" onclick="delReceta(${i})">X</button>
     </div>
   `).join("");
   const total = state.recipeDraft.reduce((acc, r) => acc + (Number(r.cantidad || 0) * Number(r.costo_unit || 0)), 0);
@@ -826,33 +940,34 @@ function renderAjustes() {
 function renderCategorias() {
   const lista = $("#categorias-lista");
   if (!lista) return;
-  const cats = db.categorias || [];
-  lista.innerHTML = cats.map((cat, i) => `
-    <div class="row">
+  lista.innerHTML = (db.categorias || []).map((cat, i) => `
+    <div class="row" style="justify-content:space-between;align-items:center;">
       <span style="flex:1;font-size:18px">${esc(cat)}</span>
-      ${cats.length > 1 ? `<button class="mini-btn" onclick="eliminarCategoria(${i})">✕</button>` : ""}
+      ${db.categorias.length > 1 ? `<button class="mini-btn" onclick="eliminarCategoria(${i})">✕</button>` : ""}
     </div>
   `).join("");
 }
 
 function agregarCategoria() {
   const inp = $("#nueva-categoria-input");
-  const val = inp.value.trim().toUpperCase();
+  const val = inp.value.trim();
   if (!val) return;
   if (db.categorias.includes(val)) return openMessage("Categoría", "Ya existe esa categoría.");
   db.categorias.push(val);
   saveDB();
   inp.value = "";
   renderCategorias();
+  renderProductoAccordion();
 }
 
 function eliminarCategoria(i) {
   const cat = db.categorias[i];
   const enUso = db.productos.some(p => p.cat === cat);
-  if (enUso) return openMessage("Categoría en uso", `"${cat}" tiene productos asignados. Cambia o elimina esos productos primero.`);
+  if (enUso) return openMessage("Categoría en uso", `"${esc(cat)}" tiene productos. Cambia o elimina esos productos primero.`);
   db.categorias.splice(i, 1);
   saveDB();
   renderCategorias();
+  renderProductoAccordion();
 }
 
 function saveConfigFromUI() {
@@ -871,29 +986,15 @@ async function handleBizLogo(e) {
   renderTopbar();
 }
 
-async function handleBizBanner(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  db.config.business_banner = await compressToBase64(file, 880);
-  saveDB();
-  renderTopbar();
-}
-
-function applyFontScale(scale) {
-  document.documentElement.style.setProperty("--font-scale", scale || 1);
-}
-
 function applyTheme() {
   const t = db.config.theme === "verde" ? "verde" : "azul";
   const root = document.documentElement;
   const customPrimary = db.config.primary_color || "#e58ba6";
   let palette;
   if (t === "azul") {
-    palette = { bg: "#f4faff", surface: "#ecf7ff", surfaceSoft: "#bfe6ff", surfaceDeep: "#9fd5ef", line: "#14222d", text: "#0b161f", textSoft: "#172733", textMuted: "#324b5f", primary: customPrimary,
-      card1:"#ecf7ff", card2:"#fef0f5", card3:"#f4f0ff", card4:"#f0fff8", card5:"#fffbe6", card6:"#f0f8ff" };
-  } else {
-    palette = { bg: "#f7fff5", surface: "#f0ffe9", surfaceSoft: "#d0f0c7", surfaceDeep: "#b7e3ab", line: "#1a2b1a", text: "#0d170d", textSoft: "#1d2f1d", textMuted: "#3e5a3f", primary: customPrimary,
-      card1:"#f0ffe9", card2:"#fef9e7", card3:"#f0f8ff", card4:"#fdf0f5", card5:"#f5f0ff", card6:"#f0fff4" };
+    palette = { bg: "#f4faff", surface: "#ecf7ff", surfaceSoft: "#bfe6ff", surfaceDeep: "#9fd5ef", line: "#14222d", text: "#0b161f", textSoft: "#172733", textMuted: "#324b5f", primary: customPrimary };
+  } else if (t === "verde") {
+    palette = { bg: "#f7fff5", surface: "#f0ffe9", surfaceSoft: "#d0f0c7", surfaceDeep: "#b7e3ab", line: "#1a2b1a", text: "#0d170d", textSoft: "#1d2f1d", textMuted: "#3e5a3f", primary: customPrimary };
   }
   root.style.setProperty("--bg", palette.bg);
   root.style.setProperty("--surface", palette.surface);
@@ -905,12 +1006,6 @@ function applyTheme() {
   root.style.setProperty("--text-muted", palette.textMuted);
   root.style.setProperty("--primary", palette.primary);
   root.style.setProperty("--primary-soft", hexToAlpha(palette.primary, 0.2));
-  root.style.setProperty("--card-1", palette.card1);
-  root.style.setProperty("--card-2", palette.card2);
-  root.style.setProperty("--card-3", palette.card3);
-  root.style.setProperty("--card-4", palette.card4);
-  root.style.setProperty("--card-5", palette.card5);
-  root.style.setProperty("--card-6", palette.card6);
   updateThemeColorMeta(palette.bg);
 }
 

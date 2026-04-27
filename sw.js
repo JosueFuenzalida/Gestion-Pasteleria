@@ -1,11 +1,14 @@
-const CACHE_NAME = "pasteleria-v1";
+const CACHE_NAME = "pasteleria-v2";
+const BASE = "/Gestion-Pasteleria";
 const ASSETS = [
-  "./Gestion-Pasteleria/",
-  "./Gestion-Pasteleria/index.html",
-  "./Gestion-Pasteleria/styles.css",
-  "./Gestion-Pasteleria/app.js",
-  "./Gestion-Pasteleria/manifest.json",
-  "./Gestion-Pasteleria/icon.svg"
+  BASE + "/",
+  BASE + "/index.html",
+  BASE + "/styles.css",
+  BASE + "/app.js",
+  BASE + "/manifest.json",
+  BASE + "/icon.svg",
+  BASE + "/icon-192.png",
+  BASE + "/icon-512.png"
 ];
 
 self.addEventListener("install", event => {
@@ -34,7 +37,7 @@ self.addEventListener("fetch", event => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
         return res;
-      }).catch(() => caches.match('/Gestion-Pasteleria/'));
+      }).catch(() => caches.match(BASE + "/"));
     })
   );
 });

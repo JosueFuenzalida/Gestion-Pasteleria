@@ -1,4 +1,4 @@
-const CACHE_NAME = "pasteleria-v7";
+const CACHE_NAME = "pasteleria-v1";
 const ASSETS = [
   "./Gestion-Pasteleria/",
   "./Gestion-Pasteleria/index.html",
